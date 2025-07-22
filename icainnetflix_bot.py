@@ -23,12 +23,31 @@ logging.basicConfig(
 )
 
 # Example /start command handler
+# inside your bot code (replace the existing /start handler)
 def start(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-    if user_id != ADMIN_ID:
-        update.message.reply_text("Access denied. You're not authorized.")
+    admin_id = 6658131120
+
+    # Check if user is already approved
+    if str(user_id) in get_approved_users():
+        update.message.reply_text("✅ Access granted. Use /sicode, /tcode, /reset, etc.")
         return
-    update.message.reply_text("Welcome, admin!")
+
+    # If user is the admin, grant access automatically
+    if user_id == admin_id:
+        add_approved_user(user_id)
+        update.message.reply_text("👑 Hello Admin! You now have access.")
+        return
+
+    # Send approval request to admin
+    context.bot.send_message(
+        chat_id=admin_id,
+        text=f"👤 New access request:\nUser: {update.effective_user.full_name} (`{user_id}`)\nReply with `/approve {user_id}` to grant access.",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    update.message.reply_text("🕒 Request sent for approval. Please wait for admin confirmation.")
+
 
 # Define main loop
 def main():
