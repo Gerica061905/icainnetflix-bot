@@ -75,10 +75,15 @@ def approve(update: Update, context: CallbackContext):
     try:
         user_id = int(context.args[0])
         approved_users[user_id] = datetime.utcnow()
-        context.bot.send_message(chat_id=user_id, text="✅ You’ve been approved for 7 days!")
+
+        try:
+            context.bot.send_message(chat_id=user_id, text="✅ You’ve been approved for 7 days!")
+        except Exception as e:
+            update.message.reply_text(f"⚠️ Failed to notify user: {e}")
+
         update.message.reply_text(f"✅ User {user_id} approved for 7 days.")
-    except:
-        update.message.reply_text("⚠️ Usage: /approve <user_id>")
+    except Exception as e:
+        update.message.reply_text(f"⚠️ Usage: /approve <user_id>\nError: {e}")
 
 def remove(update: Update, context: CallbackContext):
     if update.effective_user.id != ADMIN_ID:
