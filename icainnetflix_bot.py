@@ -43,6 +43,12 @@ dispatcher.add_handler(CommandHandler("start", start))
 # Define main loop
 def main():
     logging.info("Bot is starting...")
+    updater = Updater(BOT_TOKEN, use_context=True)  # Use BOT_TOKEN, not TOKEN
+    dispatcher = updater.dispatcher
+
+    # Example handler
+    dispatcher.add_handler(CommandHandler("start", start))
+
     updater.start_polling()
     updater.idle()
 
