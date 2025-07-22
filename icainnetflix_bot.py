@@ -1,159 +1,147 @@
 import os
 import logging
+import imaplib
+import email
+import re
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from telegram import Update, ParseMode
 from telegram.ext import Updater, CommandHandler, CallbackContext
-from datetime import datetime, timedelta
 
-# Load .env
+# Load environment variables
 load_dotenv()
-TOKEN = os.getenv("TOKEN")
+
+# Bot token and admin ID
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
-# Store approvals
-approved_users = {}  # user_id: datetime
+# Gmail credentials
+GMAIL_ACCOUNTS = [
+    (os.getenv("GMAIL_1_EMAIL"), os.getenv("GMAIL_1_APP_PASSWORD")),
+    (os.getenv("GMAIL_2_EMAIL"), os.getenv("GMAIL_2_APP_PASSWORD")),
+    (os.getenv("GMAIL_3_EMAIL"), os.getenv("GMAIL_3_APP_PASSWORD")),
+    (os.getenv("GMAIL_4_EMAIL"), os.getenv("GMAIL_4_APP_PASSWORD")),
+]
 
 # Logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Access check decorator
-def check_access(func):
-    def wrapper(update: Update, context: CallbackContext):
-        user_id = update.effective_user.id
-        now = datetime.utcnow()
+# Approved users memory
+approved_users = set()
 
-        # Not approved
-        if user_id not in approved_users:
-            return update.message.reply_text("❌ You’re not approved.")
+# --- Email Utilities ---
 
-        # Expired
-        approved_time = approved_users[user_id]
-        if now - approved_time > timedelta(days=7):
-            del approved_users[user_id]
-            update.message.reply_text("⏳ Your access expired. Please request again.")
-            context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"🔄 User @{update.effective_user.username or 'NoUsername'} (ID: {user_id}) expired.",
-            )
-            return
+def search_email(subject_filter: str, is_link=False):
+    for email_address, app_password in GMAIL_ACCOUNTS:
+        try:
+            mail = imaplib.IMAP4_SSL("imap.gmail.com")
+            mail.login(email_address, app_password)
+            mail.select("inbox")
 
-        return func(update, context)
-    return wrapper
+            result, data = mail.search(None, '(UNSEEN SUBJECT "{}")'.format(subject_filter))
+            if result == "OK":
+                email_ids = data[0].split()
+                for e_id in reversed(email_ids):
+                    result, msg_data = mail.fetch(e_id, "(RFC822)")
+                    if result != "OK":
+                        continue
+                    raw_email = msg_data[0][1]
+                    msg = email.message_from_bytes(raw_email)
+                    body = ""
+
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            if part.get_content_type() == "text/plain":
+                                body += part.get_payload(decode=True).decode()
+                    else:
+                        body = msg.get_payload(decode=True).decode()
+
+                    if is_link:
+                        urls = re.findall(r"https?://\S+", body)
+                        if urls:
+                            return urls[0]
+                    else:
+                        code_match = re.search(r"\b\d{4}\b", body)
+                        if code_match:
+                            return code_match.group()
+            mail.logout()
+        except Exception as e:
+            print(f"Error reading {email_address}: {e}")
+    return None
+
+# --- Command Handlers ---
 
 def start(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-    username = update.effective_user.username or "NoUsername"
-
-    msg = (
-        "🌸 *Welcome to @ic4in Netflix Bot!* 🌸\n\n"
-        "To request something, use the command *plus your email*.\n"
-        "_Example:_ `/sicode your@email.com`\n\n"
-        "💖 *Available Commands:* 💖\n"
-        "`/sicode` – Sign in code\n"
-        "`/tcode` – Tempo code\n"
-        "`/reset` – Reset password link\n"
-        "`/hlink` – Household link\n"
-        "`/rslink` – Request sign-in link\n\n"
-        "⚠️ Access is required. Wait for admin approval if this is your first time.\n"
-        "_Note: Access is valid for 7 days only._"
-    )
-
-    if user_id in approved_users:
-        update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    if user_id in approved_users or user_id == ADMIN_ID:
+        context.bot.send_message(chat_id=update.effective_chat.id, text="✅ You are already approved.")
     else:
-        update.message.reply_text(msg + "\n\n⏳ Requesting access from admin...", parse_mode=ParseMode.MARKDOWN)
-        context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                f"🔐 Access request from @{username} (ID: `{user_id}`).\n"
-                f"`/approve {user_id}` to approve\n"
-                f"`/remove {user_id}` to remove"
-            ),
-            parse_mode=ParseMode.MARKDOWN
-        )
+        context.bot.send_message(chat_id=ADMIN_ID, text=f"👤 User ID `{user_id}` wants to access the bot.\n\nApprove using:\n`/approve {user_id}`", parse_mode=ParseMode.MARKDOWN)
+        context.bot.send_message(chat_id=user_id, text="⏳ Waiting for admin approval...")
 
 def approve(update: Update, context: CallbackContext):
     if update.effective_user.id != ADMIN_ID:
-        return update.message.reply_text("⛔ You’re not allowed to approve.")
+        return
     try:
         user_id = int(context.args[0])
-        approved_users[user_id] = datetime.utcnow()
-
-        try:
-            context.bot.send_message(chat_id=user_id, text="✅ You’ve been approved for 7 days!")
-        except Exception as e:
-            update.message.reply_text(f"⚠️ Couldn't notify user: {e}")
-
-        update.message.reply_text(f"✅ User {user_id} approved.")
-    except Exception as e:
-        update.message.reply_text(f"⚠️ Usage: /approve <user_id>\nError: {e}")
-
-def remove(update: Update, context: CallbackContext):
-    if update.effective_user.id != ADMIN_ID:
-        return update.message.reply_text("⛔ You’re not allowed to remove users.")
-    try:
-        user_id = int(context.args[0])
-        if user_id in approved_users:
-            del approved_users[user_id]
-            context.bot.send_message(chat_id=user_id, text="🚫 Your access has been revoked.")
-            update.message.reply_text(f"🚫 User {user_id} removed.")
-        else:
-            update.message.reply_text("⚠️ That user is not approved.")
+        approved_users.add(user_id)
+        context.bot.send_message(chat_id=user_id, text="✅ Access granted by admin.")
+        context.bot.send_message(chat_id=ADMIN_ID, text=f"👍 User `{user_id}` has been approved.", parse_mode=ParseMode.MARKDOWN)
     except:
-        update.message.reply_text("⚠️ Usage: /remove <user_id>")
+        context.bot.send_message(chat_id=update.effective_chat.id, text="⚠️ Usage: /approve <user_id>")
 
-# Command handlers with email argument
-@check_access
+def require_approval(func):
+    def wrapper(update: Update, context: CallbackContext):
+        user_id = update.effective_user.id
+        if user_id in approved_users or user_id == ADMIN_ID:
+            return func(update, context)
+        else:
+            context.bot.send_message(chat_id=user_id, text="⛔ You are not approved yet.")
+    return wrapper
+
+@require_approval
 def sicode(update: Update, context: CallbackContext):
-    if not context.args:
-        return update.message.reply_text("❗ Usage: /sicode your@email.com")
-    email = context.args[0]
-    update.message.reply_text(f"🔐 Sign-in code for *{email}*: `1234`", parse_mode=ParseMode.MARKDOWN)
+    code = search_email("Your sign-in code")
+    msg = f"🔐 *Sign-in Code:* `{code}`" if code else "❌ Code not found."
+    context.bot.send_message(chat_id=update.effective_chat.id, text=msg, parse_mode=ParseMode.MARKDOWN)
 
-@check_access
+@require_approval
 def tcode(update: Update, context: CallbackContext):
-    if not context.args:
-        return update.message.reply_text("❗ Usage: /tcode your@email.com")
-    email = context.args[0]
-    update.message.reply_text(f"📩 Tempo code for *{email}*: `4321`", parse_mode=ParseMode.MARKDOWN)
+    code = search_email("Netflix temporary access code")
+    msg = f"🎟️ *Temporary Access Code:* `{code}`" if code else "❌ Code not found."
+    context.bot.send_message(chat_id=update.effective_chat.id, text=msg, parse_mode=ParseMode.MARKDOWN)
 
-@check_access
+@require_approval
 def reset(update: Update, context: CallbackContext):
-    if not context.args:
-        return update.message.reply_text("❗ Usage: /reset your@email.com")
-    email = context.args[0]
-    update.message.reply_text(f"🔁 [Reset password link](https://example.com/reset?email={email})", parse_mode=ParseMode.MARKDOWN)
+    link = search_email("Complete your password reset request", is_link=True)
+    msg = f"[🔗 Reset Password Link]({link})" if link else "❌ Reset link not found."
+    context.bot.send_message(chat_id=update.effective_chat.id, text=msg, parse_mode=ParseMode.MARKDOWN)
 
-@check_access
-def hlink(update: Update, context: CallbackContext):
-    if not context.args:
-        return update.message.reply_text("❗ Usage: /hlink your@email.com")
-    email = context.args[0]
-    update.message.reply_text(f"🏠 [Household link](https://example.com/household?email={email})", parse_mode=ParseMode.MARKDOWN)
-
-@check_access
+@require_approval
 def rslink(update: Update, context: CallbackContext):
-    if not context.args:
-        return update.message.reply_text("❗ Usage: /rslink your@email.com")
-    email = context.args[0]
-    update.message.reply_text(f"📨 [Request sign-in link](https://example.com/request?email={email})", parse_mode=ParseMode.MARKDOWN)
+    link = search_email("Approve new sign in request", is_link=True)
+    msg = f"[🔐 Approve Sign-in Link]({link})" if link else "❌ Sign-in link not found."
+    context.bot.send_message(chat_id=update.effective_chat.id, text=msg, parse_mode=ParseMode.MARKDOWN)
 
-# Main runner
+@require_approval
+def hlink(update: Update, context: CallbackContext):
+    link = search_email("How to Update your Netflix Household", is_link=True)
+    msg = f"[🏠 Household Update Link]({link})" if link else "❌ Household link not found."
+    context.bot.send_message(chat_id=update.effective_chat.id, text=msg, parse_mode=ParseMode.MARKDOWN)
+
 def main():
-    updater = Updater(TOKEN, use_context=True)
+    updater = Updater(token=BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("approve", approve))
-    dp.add_handler(CommandHandler("remove", remove))
     dp.add_handler(CommandHandler("sicode", sicode))
     dp.add_handler(CommandHandler("tcode", tcode))
     dp.add_handler(CommandHandler("reset", reset))
-    dp.add_handler(CommandHandler("hlink", hlink))
     dp.add_handler(CommandHandler("rslink", rslink))
+    dp.add_handler(CommandHandler("hlink", hlink))
 
     updater.start_polling()
-    print("🤖 Bot is running...")
     updater.idle()
 
 if __name__ == "__main__":
