@@ -12,16 +12,9 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
-# Debug print (optional)
-print("BOT_TOKEN:", BOT_TOKEN)
-
 # Fail early if the token is missing
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN is not set or loaded from .env")
-
-# Initialize the updater
-updater = Updater(BOT_TOKEN, use_context=True)
-dispatcher = updater.dispatcher
 
 # Set up logging
 logging.basicConfig(
@@ -37,18 +30,18 @@ def start(update: Update, context: CallbackContext):
         return
     update.message.reply_text("Welcome, admin!")
 
-# Add command handlers
-dispatcher.add_handler(CommandHandler("start", start))
-
 # Define main loop
 def main():
     logging.info("Bot is starting...")
-    updater = Updater(BOT_TOKEN, use_context=True)  # Use BOT_TOKEN, not TOKEN
+    
+    # Create updater and dispatcher inside main
+    updater = Updater(BOT_TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
-    # Example handler
+    # Register handlers
     dispatcher.add_handler(CommandHandler("start", start))
 
+    # Start polling
     updater.start_polling()
     updater.idle()
 
