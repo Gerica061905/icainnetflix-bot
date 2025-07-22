@@ -8,62 +8,110 @@ from datetime import datetime
 # Load environment variables from .env file
 load_dotenv()
 
-# Get the BOT_TOKEN from .env
+# Get the BOT_TOKEN and ADMIN_ID
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "6658131120"))
 
-# Fail early if the token is missing
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN is not set or loaded from .env")
 
-# Set up logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# Approved users will be stored in a file
+APPROVED_USERS_FILE = "approved_users.txt"
 
-# Example /start command handler
-# inside your bot code (replace the existing /start handler)
+def get_approved_users():
+    if not os.path.exists(APPROVED_USERS_FILE):
+        return set()
+    with open(APPROVED_USERS_FILE, "r") as f:
+        return set(line.strip() for line in f if line.strip())
+
+def add_approved_user(user_id):
+    approved = get_approved_users()
+    if str(user_id) not in approved:
+        with open(APPROVED_USERS_FILE, "a") as f:
+            f.write(f"{user_id}\n")
+
+def remove_approved_user(user_id):
+    approved = get_approved_users()
+    if str(user_id) in approved:
+        approved.remove(str(user_id))
+        with open(APPROVED_USERS_FILE, "w") as f:
+            for uid in approved:
+                f.write(f"{uid}\n")
+
+def is_user_approved(user_id):
+    return str(user_id) in get_approved_users()
+
+# /start command
 def start(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-    admin_id = 6658131120
+    username = update.effective_user.username or update.effective_user.full_name
 
-    # Check if user is already approved
-    if str(user_id) in get_approved_users():
+    if is_user_approved(user_id):
         update.message.reply_text("✅ Access granted. Use /sicode, /tcode, /reset, etc.")
-        return
-
-    # If user is the admin, grant access automatically
-    if user_id == admin_id:
+    elif user_id == ADMIN_ID:
         add_approved_user(user_id)
-        update.message.reply_text("👑 Hello Admin! You now have access.")
+        update.message.reply_text("👑 Hello Admin! You have full access.")
+    else:
+        context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"🔐 *Access request*\nUser: @{username}\nID: `{user_id}`\nReply with /approve {user_id} to grant access.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        update.message.reply_text("🕒 Access request sent to admin. Please wait for approval.")
+
+# /approve command (admin only)
+def approve(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        update.message.reply_text("❌ You are not authorized to approve users.")
         return
 
-    # Send approval request to admin
-    context.bot.send_message(
-        chat_id=admin_id,
-        text=f"👤 New access request:\nUser: {update.effective_user.full_name} (`{user_id}`)\nReply with `/approve {user_id}` to grant access.",
-        parse_mode=ParseMode.MARKDOWN
-    )
+    if not context.args:
+        update.message.reply_text("⚠️ Usage: /approve <user_id>")
+        return
 
-    update.message.reply_text("🕒 Request sent for approval. Please wait for admin confirmation.")
+    target_id = context.args[0]
+    add_approved_user(target_id)
+    update.message.reply_text(f"✅ Approved user `{target_id}`.", parse_mode=ParseMode.MARKDOWN)
+    context.bot.send_message(chat_id=int(target_id), text="✅ You have been approved to use the bot!")
 
+# /remove command (admin only)
+def remove(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        update.message.reply_text("❌ You are not authorized to remove users.")
+        return
 
-# Define main loop
+    if not context.args:
+        update.message.reply_text("⚠️ Usage: /remove <user_id>")
+        return
+
+    target_id = context.args[0]
+    remove_approved_user(target_id)
+    update.message.reply_text(f"❌ Removed user `{target_id}`.", parse_mode=ParseMode.MARKDOWN)
+
+# Replace this with your command handlers like /sicode, etc.
+def protected_command(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID and not is_user_approved(user_id):
+        update.message.reply_text("❌ Access denied. Please wait for admin approval.")
+        return
+    update.message.reply_text("✅ You are authorized to use this command.")
+
 def main():
-    logging.info("Bot is starting...")
-    
-    # Create updater and dispatcher inside main
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
     updater = Updater(BOT_TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
-    # Register handlers
     dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("approve", approve))
+    dispatcher.add_handler(CommandHandler("remove", remove))
 
-    # Start polling
+    # Placeholder for protected commands (e.g., /sicode)
+    dispatcher.add_handler(CommandHandler("protected", protected_command))
+
     updater.start_polling()
     updater.idle()
 
-# Run the bot
 if __name__ == "__main__":
     main()
