@@ -4,11 +4,11 @@ from dotenv import load_dotenv
 from telegram import Update, ParseMode
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from datetime import datetime
-
-# Load .env variables
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
+
 
 # Logging
 logging.basicConfig(
