@@ -60,7 +60,35 @@ def approve(update: Update, context: CallbackContext):
 
 @require_approval
 def start(update: Update, context: CallbackContext):
-    update.message.reply_text("👋 Welcome! Use /sicode, /tcode, /reset, /rslink, or /hlink.")
+    user_id = update.effective_user.id
+    msg = (
+        "🌸 *Welcome to @ic4in Netflix Bot!* 🌸\n\n"
+        "To request something, use the command *plus your email*.\n"
+        "_Example:_ `/sicode your@email.com`\n\n"
+        "💖 *Available Commands:* 💖\n"
+        "`/sicode` – Sign in code\n"
+        "`/tcode` – Tempo code\n"
+        "`/reset` – Reset password link\n"
+        "`/hlink` – Household link\n"
+        "`/rslink` – Request sign-in link\n\n"
+        "⚠️ Access is required. Wait for admin approval if this is your first time.\n"
+        "_Note: Access is valid for 7 days only._"
+    )
+
+    if user_id in approved_users:
+        update.message.reply_markdown(msg)
+    else:
+        update.message.reply_markdown(msg + "\n\n⏳ Requesting access from admin...")
+        context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=(
+                f"🔐 Access request from @{update.effective_user.username or 'NoUsername'} (ID: `{user_id}`).\n"
+                f"`/approve {user_id}` to approve\n"
+                f"`/remove {user_id}` to remove"
+            ),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
 
 def search_email(subject_filter: str, is_link=False):
     for email_address, app_password in GMAIL_ACCOUNTS:
