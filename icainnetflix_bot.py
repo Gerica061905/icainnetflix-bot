@@ -144,7 +144,7 @@ def start(update, context):
                  "⪩ `/tcode` <email>\n"
                  "⪩ `/reset` <email>\n"
                  "⪩ `/rslink` <email>\n"
-                 "⪩ `/hlink` <email>"
+                 "⪩ `/hlink` <email>\n"
                   "*Before you send commands, make sure you have sent it in Netflix.*",
             parse_mode=ParseMode.MARKDOWN
         )
