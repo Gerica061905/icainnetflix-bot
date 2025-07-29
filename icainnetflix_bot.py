@@ -1,198 +1,437 @@
-import os
-import logging
-import imaplib
-import email
-import re
+# Standard library
+import os, time, re, logging, email, imaplib
+from datetime import datetime, timedelta
+from email.header import decode_header
 
+# Third-party
+import requests
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
-from apscheduler.schedulers.background import BackgroundScheduler
-from telegram.constants import ParseMode
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from telegram import Bot, ParseMode
+from telegram.utils.request import Request
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
-# Load .env
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Bot & Admin setup
+request = Request(con_pool_size=8, read_timeout=15)
+TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
-# Logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-
-# In-memory user tracking
-pending_users = set()
-approved_users = set()
-
-# Load approved users from file
-def load_approved_users():
-    if os.path.exists("approved_users.txt"):
-        with open("approved_users.txt", "r") as f:
-            for line in f:
-                approved_users.add(int(line.strip()))
-
-def save_approved_user(user_id):
-    with open("approved_users.txt", "a") as f:
-        f.write(f"{user_id}\n")
-
-# MarkdownV2 escape
-def escape_markdown(text):
-    escape_chars = r"_*[]()~`>#+-=|{}.!\\"
-    return "".join("\\" + c if c in escape_chars else c for c in text)
-
-# Start command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id in approved_users:
-        await context.bot.send_message(chat_id=user_id, text="✅ You are already approved.")
-        return
-
-    pending_users.add(user_id)
-    username = update.effective_user.username or "unknown"
-    msg = (
-        f"⚠️ *New access request!*\n"
-        f"👤 User: @{escape_markdown(username)} (`{user_id}`)\n\n"
-        f"Use /approve {user_id} to grant access."
-    )
-    await context.bot.send_message(chat_id=ADMIN_ID, text=msg, parse_mode=ParseMode.MARKDOWN_V2)
-
-    await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for admin approval...")
-
-# Approve command
-async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    if len(context.args) != 1 or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /approve <user_id>")
-        return
-
-    user_id = int(context.args[0])
-    approved_users.add(user_id)
-    pending_users.discard(user_id)
-    save_approved_user(user_id)
-
-    await context.bot.send_message(chat_id=user_id, text="✅ Access granted!")
-    await update.message.reply_text(f"User {user_id} has been approved.")
-
-# Check access before commands
-def require_approval(func):
-    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-        if user_id not in approved_users:
-            await update.message.reply_text("❌ Access denied. Use /start to request access.")
-            return
-        await func(update, context)
-    return wrapper
-
-# Gmail IMAP config
+# Gmail credentials
 GMAIL_ACCOUNTS = [
-    {
-        "email": "colejxxne@gmail.com",
-        "password": "gjyx otoh gbqo chlp",
-    },
-    {
-        "email": "bayybaipo@gmail.com",
-        "password": "bllx nusx tner jzpw",
-    },
-    {
-        "email": "zachmuhs5@gmail.com",
-        "password": "uczn rzqb tvty pyzv",
-    },
-    {
-        "email": "sharinganieh@gmail.com",
-        "password": "gzgp izfb gsuf yjqd",
-    },
+    (os.getenv("GMAIL_1_EMAIL"), os.getenv("GMAIL_1_PASS")),
+    (os.getenv("GMAIL_2_EMAIL"), os.getenv("GMAIL_2_PASS")),
+    (os.getenv("GMAIL_3_EMAIL"), os.getenv("GMAIL_3_PASS")),
+    (os.getenv("GMAIL_4_EMAIL"), os.getenv("GMAIL_4_PASS")),
 ]
 
-# Email search helper
-def search_email(subject_keyword, extract_pattern):
-    for account in GMAIL_ACCOUNTS:
+APPROVED_USERS_FILE = "approved_users.txt"
+
+EMAIL_REGEX = re.compile(r"[^@]+@[^@]+\.[^@]+")
+def is_valid_email(email):
+    return EMAIL_REGEX.match(email)
+
+def log_command(user, command_name, email=None):
+    username = user.username or f"{user.first_name} {user.last_name or ''}".strip()
+    log_msg = f"Command {command_name} used by {username} (ID: {user.id})"
+    if email:
+        log_msg += f" | Target Email: {email}"
+    logging.info(log_msg)
+
+def load_approved_users():
+    try:
+        with open(APPROVED_USERS_FILE, "r") as f:
+            lines = f.readlines()
+        return {line.split(",")[0]: float(line.strip().split(",")[1]) for line in lines}
+    except:
+        return {}
+
+def save_approved_users(users):
+    with open(APPROVED_USERS_FILE, "w") as f:
+        for uid, ts in users.items():
+            f.write(f"{uid},{ts}\n")
+
+approved_users = load_approved_users()
+
+def is_user_approved(user_id):
+    expiry = approved_users.get(str(user_id))
+    if not expiry:
+        return False
+    if time.time() > expiry:
+        del approved_users[str(user_id)]
+        save_approved_users(approved_users)
+        return False
+    return True
+
+def approve_user(update, context):
+    if update.message.chat_id != ADMIN_ID:
+        update.message.reply_text("⛔ You are not authorized to use this command.")
+        return
+
+    try:
+        uid = str(context.args[0])
+        approved_users[uid] = time.time() + 7 * 86400  # 7 days
+        save_approved_users(approved_users)
+
+        context.bot.send_message(
+            chat_id=int(uid),
+            text=(
+                "💋 *Access Approved*\n"
+                "Welcome to @ic4in BOT!\n"
+                "Use any command below:\n"
+                "⪩ `/sicode` <email>\n"
+                "⪩ `/tcode` <email>\n"
+                "⪩ `/reset` <email>\n"
+                "⪩ `/rslink` <email>\n"
+                "⪩ `/hlink` <email>"
+            ),
+            parse_mode='Markdown'
+        )
+
+        update.message.reply_text(f"✅ Approved user {uid}")
+
+    except (IndexError, ValueError):
+        update.message.reply_text("❌ Usage: /approve <user_id>")
+    except Exception as e:
+        update.message.reply_text("❌ Failed to approve user.")
+        print(f"Error in /approve: {e}")
+
+def remove_user(update, context):
+    if update.message.chat_id != ADMIN_ID:
+        return
+    try:
+        uid = str(context.args[0])
+        if uid in approved_users:
+            del approved_users[uid]
+            save_approved_users(approved_users)
+            update.message.reply_text(f"❌ Removed user {uid}")
+        else:
+            update.message.reply_text("User not found.")
+    except:
+        update.message.reply_text("❌ Failed to remove user.")
+
+def start(update, context):
+    user = update.message.from_user
+    uid = user.id
+
+    if not is_user_approved(uid):
+        context.bot.send_message(
+            chat_id=uid,
+            text="💋 *Waiting for admin approval…*",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"💄 *Approval Request*\n"
+                 f"User: `{user.full_name}`\n"
+                 f"ID: `{uid}`\n\n"
+                 f"To approve, send:\n`/approve {uid}`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        context.bot.send_message(
+            chat_id=uid,
+            text="💋 *welcome to @ic4in BOT!*\nUse any command below:\n"
+                 "⪩ `/sicode` <email>\n"
+                 "⪩ `/tcode` <email>\n"
+                 "⪩ `/reset` <email>\n"
+                 "⪩ `/rslink` <email>\n"
+                 "⪩ `/hlink` <email>"
+                  "*Before you send commands, make sure you have sent it in Netflix.*",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+# --------------- GMAIL FETCH FUNCTION ---------------
+
+def fetch_latest_matching_email(target_email, subject_keyword):
+    now = datetime.utcnow()
+    cutoff_time = now - timedelta(minutes=15)
+
+    for email_user, email_pass in GMAIL_ACCOUNTS:
         try:
-            mail = imaplib.IMAP4_SSL("imap.gmail.com")
-            mail.login(account["email"], account["password"])
-            mail.select("inbox")
-            result, data = mail.search(None, f'(SUBJECT "{subject_keyword}")')
+            imap = imaplib.IMAP4_SSL("imap.gmail.com")
+            imap.login(email_user, email_pass)
+            imap.select("inbox")
+
+            # Only search for the SUBJECT to optimize speed
+            result, data = imap.search(None, 'SUBJECT "{}"'.format(subject_keyword))
 
             if result == "OK":
-                for num in data[0].split()[::-1]:
-                    result, msg_data = mail.fetch(num, "(RFC822)")
+                ids = data[0].split()
+                ids.reverse()  # Most recent first
+
+                for mail_id in ids[:10]:  # only check the 10 latest emails
+                    res, msg_data = imap.fetch(mail_id, "(RFC822)")
+                    if res != "OK": continue
+
                     raw_email = msg_data[0][1]
                     msg = email.message_from_bytes(raw_email)
-                    body = ""
 
+                    # Match "To" field against the target email
+                    to_header = msg.get("To", "")
+                    if target_email.lower() not in to_header.lower():
+                        continue
+
+                    # Check if the email was received within 1 minute
+                    date_tuple = email.utils.parsedate_tz(msg.get("Date"))
+                    if date_tuple:
+                        local_date = datetime.fromtimestamp(email.utils.mktime_tz(date_tuple))
+                        if local_date < cutoff_time:
+                            continue
+
+                    # Get subject
+                    subject, encoding = decode_header(msg.get("Subject"))[0]
+                    if isinstance(subject, bytes):
+                        subject = subject.decode(encoding or "utf-8")
+
+                    # Get body
+                    body = ""
                     if msg.is_multipart():
                         for part in msg.walk():
-                            if part.get_content_type() == "text/plain":
-                                body = part.get_payload(decode=True).decode()
+                            content_type = part.get_content_type()
+                            if content_type == "text/plain" and not part.get('Content-Disposition'):
+                                body = part.get_payload(decode=True).decode(errors="ignore")
                                 break
                     else:
-                        body = msg.get_payload(decode=True).decode()
+                        body = msg.get_payload(decode=True).decode(errors="ignore")
 
-                    match = re.search(extract_pattern, body)
-                    if match:
-                        mail.logout()
-                        return match.group(1)
-            mail.logout()
+                    imap.logout()
+                    return subject, body
+
+            imap.logout()
         except Exception as e:
-            logging.error(f"Error checking {account['email']}: {e}")
-    return None
+            print(f"Error reading {email_user}: {e}")
 
-# Commands
-@require_approval
-async def sicode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    code = search_email("Your sign-in code", r"code is (\d{4})")
-    msg = f"🔑 *Sign-in code:* `{code}`" if code else "❌ No sign-in code found."
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+    return None, None
 
-@require_approval
-async def tcode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    code = search_email("Netflix temporary access code", r"code is (\d{4})")
-    msg = f"🔑 *Temporary code:* `{code}`" if code else "❌ No temporary access code found."
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+# --------------- COMMAND HANDLERS ---------------
 
-@require_approval
-async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    link = search_email("Complete your password reset request", r"(https://[^\s]+)")
-    msg = f"🔗 *Reset link:* [Click here]({link})" if link else "❌ No reset link found."
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+def sicode(update, context):
+    if not is_user_approved(update.message.chat_id):
+        return
+    if len(context.args) != 1:
+        update.message.reply_text("Usage: /sicode email@example.com")
+        return
+    target_email = context.args[0]
+    log_command(update.effective_user, "/sicode", target_email)
 
-@require_approval
-async def rslink(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    link = search_email("Approve new sign in request", r"(https://[^\s]+)")
-    msg = f"🔗 *Sign-in approval:* [Click here]({link})" if link else "❌ No sign-in approval link found."
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+    email_arg = context.args[0]
+    if not is_valid_email(email_arg):
+        return update.message.reply_text("⛔ Invalid email format.")
 
-@require_approval
-async def hlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    link = search_email("How to Update your Netflix Household", r"(https://[^\s]+)")
-    msg = f"🏠 *Household update:* [Click here]({link})" if link else "❌ No household update link found."
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+    # ✅ Respond right away
+    update.message.reply_text("⏳ Fetching, please wait...")
 
-# Main
-if __name__ == "__main__":
-    load_approved_users()
+    subject, body = fetch_latest_matching_email(context.args[0], "Your sign-in code")
+    if body:
+        import re
+        match = re.search(r'\b\d{4}\b', body)
+        if match:
+            code = match.group()
+            msg = f"💋 *sign-in code*\n✉️ {context.args[0]}\n🔐 code: {code}\n🕐 valid: 15 mins"
+            return update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    update.message.reply_text("💋 No matching email found.")
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+def tcode(update, context):
+    if not is_user_approved(update.message.chat_id):
+        return
+    if len(context.args) != 1:
+        update.message.reply_text("Usage: /tcode email@example.com")
+        return
+    target_email = context.args[0]
+    log_command(update.effective_user, "/tcode", target_email)
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("approve", approve))
-    app.add_handler(CommandHandler("sicode", sicode))
-    app.add_handler(CommandHandler("tcode", tcode))
-    app.add_handler(CommandHandler("reset", reset))
-    app.add_handler(CommandHandler("rslink", rslink))
-    app.add_handler(CommandHandler("hlink", hlink))
+    if len(context.args) != 1:
+        update.message.reply_text("Usage: /tcode email@example.com")
+        return
 
-    # Start background scheduler if needed
-    scheduler = BackgroundScheduler()
-    scheduler.start()
+    email_arg = context.args[0]
+    if not is_valid_email(email_arg):
+        return update.message.reply_text("⛔ Invalid email format.")
 
-    print("✅ Bot is running...")
-    app.run_polling()
+    target_email = context.args[0]
+    update.message.reply_text("⏳ Fetching, please wait...")
+
+    subject, body = fetch_latest_matching_email(target_email, "temporary access")
+
+    if body:
+        import re
+
+        link_match = re.search(r"https://www\.netflix\.com/account/travel/verify[^\s)>\]\"']+", body)
+        if link_match:
+            link = link_match.group(0)
+
+            try:
+                # Setup headless Chrome
+                chrome_options = Options()
+                chrome_options.add_argument("--headless")
+                chrome_options.add_argument("--disable-gpu")
+                chrome_options.add_argument("--no-sandbox")
+
+                driver = webdriver.Chrome(ChromeDriverManager().install(), options=chrome_options)
+                driver.get(link)
+
+                time.sleep(5)  # Wait for JS to load
+
+                page_source = driver.page_source
+                driver.quit()
+
+                code_match = re.search(r'\b\d{4}\b', page_source)
+                if code_match:
+                    code = code_match.group()
+                    msg = f"💋 *temporary code*\n✉️ {target_email}\n🔐 code: `{code}`\n🕐 valid: 15 mins"
+                    return update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+            except Exception as e:
+                update.message.reply_text(f"⚠️ Error fetching code: {e}")
+                return
+
+    update.message.reply_text(
+        f"⛔ No matching email found.",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+def reset(update, context):
+    if not is_user_approved(update.message.chat_id):
+        return
+    if len(context.args) != 1:
+        update.message.reply_text("Usage: /reset email@example.com")
+        return
+    target_email = context.args[0]
+    log_command(update.effective_user, "/reset", target_email)
+
+    email_arg = context.args[0]
+    if not is_valid_email(email_arg):
+        return update.message.reply_text("⛔ Invalid email format.")
+
+    update.message.reply_text("⏳ Fetching, please wait...")
+
+    subject, body = fetch_latest_matching_email(context.args[0], "Complete your password reset request")
+    if body:
+        # This ensures we extract a proper full reset URL without extra characters
+        match = re.search(r'(https://www\.netflix\.com/password\?[^)\]\s]+)', body)
+        if match:
+            link = match.group().strip(").]")  # Clean any trailing ), ]
+            msg = (
+                f"💋 *reset password link*\n"
+                f"✉️ {context.args[0]}\n"
+                f"🔗 [reset link]({link})\n"
+                f"🕐 valid: 24 hours\n"
+            )
+            return update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+    update.message.reply_text("💋 No matching email found.")
+
+def rslink(update, context):
+    if not is_user_approved(update.message.chat_id):
+        return
+    if len(context.args) != 1:
+        update.message.reply_text("Usage: /rslink email@example.com")
+        return
+    target_email = context.args[0]
+    log_command(update.effective_user, "/rslink", target_email)
+
+    if len(context.args) != 1:
+        update.message.reply_text("Usage: /rslink email@example.com")
+        return
+
+    email_arg = context.args[0]
+    if not is_valid_email(email_arg):
+        return update.message.reply_text("⛔ Invalid email format.")
+    target_email = context.args[0]
+    update.message.reply_text("⏳ Fetching approval link...")
+
+    # Look for email with this subject
+    subject, body = fetch_latest_matching_email(target_email, "Netflix: new sign-in request")
+
+    if subject and body:
+        import re
+        match = re.search(r'https:\/\/www\.netflix\.com\/ilum\?code=[\w\-]+', body)
+        if match:
+            link = match.group()
+            msg = (
+                f"💋 *approval link*\n"
+                f"✉️ {target_email}\n"
+                f"🔗 [approve now]({link})\n"
+                f"🕐 valid: ~15 mins"
+            )
+            return update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    
+    # Fallback if no link
+    update.message.reply_text("⛔ No matching email found.")
+
+def hlink(update, context):
+    if not is_user_approved(update.message.chat_id):
+        return
+    if len(context.args) != 1:
+        update.message.reply_text("Usage: /hlink email@example.com")
+        return
+    target_email = context.args[0]
+    log_command(update.effective_user, "/hlink", target_email)
+
+    if len(context.args) != 1:
+        update.message.reply_text("Usage: /hlink email@example.com")
+        return
+
+    email_arg = context.args[0]
+    if not is_valid_email(email_arg):
+        return update.message.reply_text("⛔ Invalid email format.")
+
+    target_email = context.args[0]
+    update.message.reply_text("⏳ Fetching, please wait...")
+
+    subject, body = fetch_latest_matching_email(target_email, "How to Update your Netflix Household")
+
+    if subject and body:
+        # Extract the first Netflix household update link
+        match = re.search(r"https://www\.netflix\.com/account/update-primary-location[^\s)\]>\"']+", body)
+        if match:
+            update.message.reply_text(
+                f"💋 *household update link*\n"
+                f"`mail:` {target_email}\n"
+                f"🛠️ update: [click here]({match.group(0)})\n"
+                f"valid: 15 mins",
+                parse_mode=ParseMode.MARKDOWN,
+                disable_web_page_preview=True
+            )
+            return
+
+    update.message.reply_text(
+        f"💋 *No Match Found*\n"
+        f"`mail:` {target_email}\n"
+        f"⛔ No matching email found.",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+def unknown(update, context):
+    update.message.reply_text("⛔ Unknown command.")
+
+# ---------------- RUN BOT ----------------
+
+def main():
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
+
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("approve", approve_user, pass_args=True))
+    dp.add_handler(CommandHandler("remove", remove_user, pass_args=True))
+    dp.add_handler(CommandHandler("sicode", sicode, pass_args=True))
+    dp.add_handler(CommandHandler("tcode", tcode, pass_args=True))
+    dp.add_handler(CommandHandler("reset", reset, pass_args=True))
+    dp.add_handler(CommandHandler("rslink", rslink, pass_args=True))
+    dp.add_handler(CommandHandler("hlink", hlink, pass_args=True))
+    dp.add_handler(MessageHandler(Filters.command, unknown))
+
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
+    main()
