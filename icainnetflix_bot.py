@@ -40,11 +40,21 @@ def is_valid_email(email):
     return EMAIL_REGEX.match(email)
 
 def log_command(user, command_name, email=None):
+    from telegram import Bot
     username = user.username or f"{user.first_name} {user.last_name or ''}".strip()
     log_msg = f"Command {command_name} used by {username} (ID: {user.id})"
     if email:
         log_msg += f" | Target Email: {email}"
     logging.info(log_msg)
+
+    # Send to admin via Telegram
+    try:
+        Bot(token=TOKEN).send_message(
+            chat_id=ADMIN_ID,
+            text=log_msg
+        )
+    except Exception as e:
+        logging.error(f"Failed to send admin log: {e}")
 
 def load_approved_users():
     try:
