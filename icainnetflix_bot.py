@@ -62,12 +62,13 @@ def save_approved_users(users):
 approved_users = load_approved_users()
 
 def is_user_approved(user_id):
-    expiry = approved_users.get(str(user_id))
+    users = load_approved_users()  # Always reload from file
+    expiry = users.get(str(user_id))
     if not expiry:
         return False
     if time.time() > expiry:
-        del approved_users[str(user_id)]
-        save_approved_users(approved_users)
+        del users[str(user_id)]
+        save_approved_users(users)
         return False
     return True
 
