@@ -254,61 +254,36 @@ def sicode(update, context):
 def tcode(update, context):
     if not is_user_approved(update.message.chat_id):
         return
+
     if len(context.args) != 1:
         update.message.reply_text("Usage: /tcode email@example.com")
         return
+
     target_email = context.args[0]
     log_command(update.effective_user, "/tcode", target_email)
 
-    if len(context.args) != 1:
-        update.message.reply_text("Usage: /tcode email@example.com")
-        return
-
-    email_arg = context.args[0]
-    if not is_valid_email(email_arg):
+    if not is_valid_email(target_email):
         return update.message.reply_text("⛔ Invalid email format.")
 
-    target_email = context.args[0]
     update.message.reply_text("⏳ Fetching, please wait...")
 
     subject, body = fetch_latest_matching_email(target_email, "temporary access")
 
     if body:
         import re
-
+        # Match the link in the email body
         link_match = re.search(r"https://www\.netflix\.com/account/travel/verify[^\s)>\]\"']+", body)
         if link_match:
             link = link_match.group(0)
+            msg = (
+                f"💋 *temporary code link*\n"
+                f"✉️ {target_email}\n"
+                f"🔗 [click here to get your code]({link})\n"
+                f"🕐 valid: 15 mins"
+            )
+            return update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
-            try:
-                # Setup headless Chrome
-                chrome_options = Options()
-                chrome_options.add_argument("--headless")
-                chrome_options.add_argument("--disable-gpu")
-                chrome_options.add_argument("--no-sandbox")
-
-                driver = webdriver.Chrome(ChromeDriverManager().install(), options=chrome_options)
-                driver.get(link)
-
-                time.sleep(5)  # Wait for JS to load
-
-                page_source = driver.page_source
-                driver.quit()
-
-                code_match = re.search(r'\b\d{4}\b', page_source)
-                if code_match:
-                    code = code_match.group()
-                    msg = f"💋 *temporary code*\n✉️ {target_email}\n🔐 code: `{code}`\n🕐 valid: 15 mins"
-                    return update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-
-            except Exception as e:
-                update.message.reply_text(f"⚠️ Error fetching code: {e}")
-                return
-
-    update.message.reply_text(
-        f"⛔ No matching email found.",
-        parse_mode=ParseMode.MARKDOWN
-    )
+    update.message.reply_text("⛔ No matching email found.", parse_mode=ParseMode.MARKDOWN)
 
 def reset(update, context):
     if not is_user_approved(update.message.chat_id):
