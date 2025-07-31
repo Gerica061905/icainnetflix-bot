@@ -278,7 +278,7 @@ def tcode(update, context):
             msg = (
                 f"💋 *temporary code link*\n"
                 f"✉️ {target_email}\n"
-                f"🔗 [click here to get your code]({link})\n"
+                f"🔗 [tempo code]({link})\n"
                 f"🕐 valid: 15 mins"
             )
             return update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
