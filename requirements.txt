@@ -3,3 +3,5 @@ python-dotenv==1.0.1
 selenium
 webdriver-manager
 urllib3==1.26.16
+pip install langdetect
+imghdr-py
