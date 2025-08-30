@@ -4,4 +4,3 @@ selenium
 webdriver-manager
 urllib3==1.26.16
 langdetect
-imghdr3
