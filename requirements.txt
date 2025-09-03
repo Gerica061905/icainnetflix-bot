@@ -6,3 +6,4 @@ urllib3==1.26.16
 langdetect
 imaplib2
 requests
+imghdr-py3
