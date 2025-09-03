@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from email.header import decode_header
 
 # Third-party
+import filetype
 import requests
 from dotenv import load_dotenv
 from selenium import webdriver
@@ -32,6 +33,10 @@ GMAIL_ACCOUNTS = [
     (os.getenv("GMAIL_3_EMAIL"), os.getenv("GMAIL_3_PASS")),
     (os.getenv("GMAIL_4_EMAIL"), os.getenv("GMAIL_4_PASS")),
 ]
+
+def what(file, h=None):
+    kind = filetype.guess(file)
+    return kind.extension if kind else None
 
 APPROVED_USERS_FILE = "approved_users.txt"
 
