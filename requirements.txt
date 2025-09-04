@@ -3,4 +3,3 @@ six
 urllib3<2.0
 python-dotenv
 imaplib2
-email
