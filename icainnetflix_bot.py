@@ -34,15 +34,20 @@ GMAIL_ACCOUNTS = [
     (os.getenv("GMAIL_4_EMAIL"), os.getenv("GMAIL_4_PASS")),
 ]
 
-def what(file, h=None):
-    kind = filetype.guess(file)
-    return kind.extension if kind else None
-
 APPROVED_USERS_FILE = "approved_users.txt"
 
 EMAIL_REGEX = re.compile(r"[^@]+@[^@]+\.[^@]+")
 def is_valid_email(email):
     return EMAIL_REGEX.match(email)
+
+# Patch imghdr for Python 3.13+
+import sys, types
+if "imghdr" not in sys.modules:
+    fake_imghdr = types.ModuleType("imghdr")
+    def what(file, h=None):
+        return None
+    fake_imghdr.what = what
+    sys.modules["imghdr"] = fake_imghdr
 
 def log_command(user, command_name, email=None):
     from telegram import Bot
