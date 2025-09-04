@@ -40,23 +40,6 @@ EMAIL_REGEX = re.compile(r"[^@]+@[^@]+\.[^@]+")
 def is_valid_email(email):
     return EMAIL_REGEX.match(email)
 
-# Patch imghdr for Python 3.13+
-import sys, types
-if "imghdr" not in sys.modules:
-    fake_imghdr = types.ModuleType("imghdr")
-    def what(file, h=None):
-        return None
-    fake_imghdr.what = what
-    sys.modules["imghdr"] = fake_imghdr
-
-def log_command(user, command_name, email=None):
-    from telegram import Bot
-    username = user.username or f"{user.first_name} {user.last_name or ''}".strip()
-    log_msg = f"Command {command_name} used by {username} (ID: {user.id})"
-    if email:
-        log_msg += f" | Target Email: {email}"
-    logging.info(log_msg)
-
     # Send to admin via Telegram
     try:
         Bot(token=TOKEN).send_message(
