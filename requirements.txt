@@ -1,9 +1,6 @@
 python-telegram-bot==13.15
-python-dotenv
-requests
-selenium
-webdriver-manager
-filetype
-python-telegram-bot==13.15
 six
 urllib3<2.0
+python-dotenv
+imaplib2
+email
