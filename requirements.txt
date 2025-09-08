@@ -1,5 +1,3 @@
 python-telegram-bot==13.15
-six
-urllib3<2.0
-python-dotenv
-imaplib2
+python-dotenv==1.0.1
+requests==2.32.3
