@@ -5,16 +5,24 @@ from telegram import Update, ParseMode
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from datetime import datetime, timedelta
 
-# Load environment variables
+# Load environment variables from .env (for local testing)
 load_dotenv()
+
+# Get the TOKEN and ADMIN_ID
 TOKEN = os.getenv("TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+ADMIN_ID = os.getenv("ADMIN_ID")
+
+# Check if they exist
+if not TOKEN or not ADMIN_ID:
+    raise ValueError("TOKEN or ADMIN_ID environment variable is missing!")
+
+# Convert ADMIN_ID to integer
+ADMIN_ID = int(ADMIN_ID)
 
 # User approvals with timestamp
 approved_users = {}  # user_id : datetime
 
 logging.basicConfig(level=logging.INFO)
-
 
 # ---------------------- ACCESS DECORATOR ----------------------
 def check_access(func):
