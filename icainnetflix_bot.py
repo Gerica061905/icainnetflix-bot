@@ -6,17 +6,17 @@ from telegram.ext import Updater, CommandHandler, CallbackContext
 from datetime import datetime, timedelta
 
 # Load environment variables from .env (for local testing)
+import os
+from dotenv import load_dotenv
+
 load_dotenv()
 
-# Get the TOKEN and ADMIN_ID
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = os.getenv("ADMIN_ID")
 
-# Check if they exist
 if not TOKEN or not ADMIN_ID:
-    raise ValueError("TOKEN or ADMIN_ID environment variable is missing!")
+    raise ValueError("BOT_TOKEN or ADMIN_ID environment variable is missing!")
 
-# Convert ADMIN_ID to integer
 ADMIN_ID = int(ADMIN_ID)
 
 # User approvals with timestamp
