@@ -1,7 +1,4 @@
 python-telegram-bot==13.15
 python-dotenv==1.0.1
-requests==2.32.3
-filetype==1.2.0
-imaplib2==3.6
 six==1.17.0
-urllib3==1.26.20
+urllib3<2.0
