@@ -5,11 +5,7 @@ from telegram import Update, ParseMode
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from datetime import datetime, timedelta
 
-# Load environment variables from .env (for local testing)
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
+load_dotenv()  # Load .env first
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = os.getenv("ADMIN_ID")
@@ -19,10 +15,10 @@ if not TOKEN or not ADMIN_ID:
 
 ADMIN_ID = int(ADMIN_ID)
 
+logging.basicConfig(level=logging.INFO)
+
 # User approvals with timestamp
 approved_users = {}  # user_id : datetime
-
-logging.basicConfig(level=logging.INFO)
 
 # ---------------------- ACCESS DECORATOR ----------------------
 def check_access(func):
@@ -50,10 +46,10 @@ def check_access(func):
 
     return wrapper
 
-
 # ---------------------- START COMMAND ----------------------
 def start(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
+    username = update.effective_user.username or "NoUsername"
 
     msg = (
         "🌸 *Welcome to @ic4in Netflix Bot!* 🌸\n\n"
@@ -69,7 +65,6 @@ def start(update: Update, context: CallbackContext):
         "_Note: Access is valid for 7 days only._"
     )
 
-    # If already approved
     if user_id in approved_users:
         return update.message.reply_markdown(msg)
 
@@ -79,36 +74,34 @@ def start(update: Update, context: CallbackContext):
     context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
-            f"🔐 Access request from @{update.effective_user.username or 'NoUsername'} (ID: {user_id}).\n"
-            f"/approve {user_id} to approve\n"
-            f"/remove {user_id} to remove"
+            f"💄 *Approval Request*\n"
+            f"User: @{username}\n"
+            f"ID: {user_id}\n\n"
+            f"To approve, send:\n"
+            f"/approve {user_id}\n"
+            f"To remove, send:\n"
+            f"/remove {user_id}"
         ),
         parse_mode=ParseMode.MARKDOWN
     )
-
 
 # ---------------------- ADMIN COMMANDS ----------------------
 def approve(update: Update, context: CallbackContext):
     if update.effective_user.id != ADMIN_ID:
         return update.message.reply_text("⛔ You’re not allowed to approve.")
-
     try:
         user_id = int(context.args[0])
         approved_users[user_id] = datetime.utcnow()
-
         context.bot.send_message(chat_id=user_id, text="✅ You’ve been approved for 7 days!")
         update.message.reply_text(f"✅ User {user_id} approved for 7 days.")
     except:
         update.message.reply_text("⚠️ Usage: /approve <user_id>")
 
-
 def remove(update: Update, context: CallbackContext):
     if update.effective_user.id != ADMIN_ID:
         return update.message.reply_text("⛔ You’re not allowed to remove users.")
-
     try:
         user_id = int(context.args[0])
-
         if user_id in approved_users:
             del approved_users[user_id]
             context.bot.send_message(chat_id=user_id, text="🚫 Your access has been revoked.")
@@ -118,70 +111,46 @@ def remove(update: Update, context: CallbackContext):
     except:
         update.message.reply_text("⚠️ Usage: /remove <user_id>")
 
-
 # ---------------------- USER COMMANDS ----------------------
 @check_access
 def sicode(update: Update, context: CallbackContext):
     if not context.args:
         return update.message.reply_text("❗ Usage: /sicode your@email.com")
-
     email = context.args[0]
-    update.message.reply_text(
-        f"🔐 Sign-in code for *{email}*: 1234 (Sample)",
-        parse_mode=ParseMode.MARKDOWN
-    )
-
+    update.message.reply_text(f"🔐 Sign-in code for *{email}*: 1234 (Sample)", parse_mode=ParseMode.MARKDOWN)
 
 @check_access
 def tcode(update: Update, context: CallbackContext):
     if not context.args:
         return update.message.reply_text("❗ Usage: /tcode your@email.com")
-
     email = context.args[0]
-    update.message.reply_text(
-        f"📩 Tempo code for *{email}*: 4321 (Sample)",
-        parse_mode=ParseMode.MARKDOWN
-    )
-
+    update.message.reply_text(f"📩 Tempo code for *{email}*: 4321 (Sample)", parse_mode=ParseMode.MARKDOWN)
 
 @check_access
 def reset(update: Update, context: CallbackContext):
     if not context.args:
         return update.message.reply_text("❗ Usage: /reset your@email.com")
-
     email = context.args[0]
-    update.message.reply_text(
-        f"🔁 [Reset password link]({email}) sent.",
-        parse_mode=ParseMode.MARKDOWN
-    )
-
+    update.message.reply_text(f"🔁 [Reset password link]({email}) sent.", parse_mode=ParseMode.MARKDOWN)
 
 @check_access
 def hlink(update: Update, context: CallbackContext):
     if not context.args:
         return update.message.reply_text("❗ Usage: /hlink your@email.com")
-
     email = context.args[0]
-    update.message.reply_text(
-        f"🏠 [Household link]({email}) sent.",
-        parse_mode=ParseMode.MARKDOWN
-    )
-
+    update.message.reply_text(f"🏠 [Household link]({email}) sent.", parse_mode=ParseMode.MARKDOWN)
 
 @check_access
 def rslink(update: Update, context: CallbackContext):
     if not context.args:
         return update.message.reply_text("❗ Usage: /rslink your@email.com")
-
     email = context.args[0]
-    update.message.reply_text(
-        f"📨 [Request sign-in link]({email}) sent.",
-        parse_mode=ParseMode.MARKDOWN
-    )
-
+    update.message.reply_text(f"📨 [Request sign-in link]({email}) sent.", parse_mode=ParseMode.MARKDOWN)
 
 # ---------------------- BOT SETUP ----------------------
 def main():
+    print(f"TOKEN: {TOKEN[:5]}..., ADMIN_ID: {ADMIN_ID}")
+
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
 
@@ -195,9 +164,8 @@ def main():
     dp.add_handler(CommandHandler("rslink", rslink))
 
     updater.start_polling()
-    print("🤖 Bot is running...")
+    print("🤖 Bot is running via polling...")
     updater.idle()
-
 
 if __name__ == "__main__":
     main()
