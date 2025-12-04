@@ -164,9 +164,12 @@ def main():
     dp.add_handler(CommandHandler("hlink", hlink))
     dp.add_handler(CommandHandler("rslink", rslink))
 
-  updater.start_polling()
-  print("🤖 Bot is running via polling...")
-  print("📌 Keeping bot alive...")
+updater.start_polling()
+while True:
+    time.sleep(5)
+    print("🤖 Bot is running via polling...")
+    print("📌 Keeping bot alive...")
+updater.idle()  # Prevents Railway from shutting down
 
 # Keep the bot alive on Railway Hobby plan
 while True:
