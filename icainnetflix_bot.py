@@ -27,11 +27,9 @@ def check_access(func):
         user_id = update.effective_user.id
         now = datetime.utcnow()
 
-        # Not approved
         if user_id not in approved_users:
             return update.message.reply_text("❌ You’re not approved.")
 
-        # Check if expired
         approved_time = approved_users[user_id]
         if now - approved_time > timedelta(days=7):
             del approved_users[user_id]
@@ -44,7 +42,6 @@ def check_access(func):
             return
 
         return func(update, context)
-
     return wrapper
 
 # ---------------------- START COMMAND ----------------------
@@ -69,7 +66,6 @@ def start(update: Update, context: CallbackContext):
     if user_id in approved_users:
         return update.message.reply_markdown(msg)
 
-    # Not approved → request access
     update.message.reply_markdown(msg + "\n\n⏳ Requesting access from admin...")
 
     context.bot.send_message(
@@ -155,6 +151,7 @@ def main():
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
 
+    # Add handlers
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("approve", approve))
     dp.add_handler(CommandHandler("remove", remove))
@@ -164,17 +161,18 @@ def main():
     dp.add_handler(CommandHandler("hlink", hlink))
     dp.add_handler(CommandHandler("rslink", rslink))
 
-updater.start_polling()
-while True:
-    time.sleep(5)
+    # Start polling
+    updater.start_polling()
     print("🤖 Bot is running via polling...")
-    print("📌 Keeping bot alive...")
-updater.idle()  # Prevents Railway from shutting down
 
-# Keep the bot alive on Railway Hobby plan
-while True:
-    time.sleep(5)
+    try:
+        while True:
+            time.sleep(5)
+            print("📌 Keeping bot alive...")
+    except KeyboardInterrupt:
+        print("🛑 Bot stopped manually.")
 
+    updater.idle()  # Prevents shutdown
 
 if __name__ == "__main__":
     main()
