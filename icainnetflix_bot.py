@@ -165,6 +165,7 @@ def main():
 
     updater.start_polling()
     print("🤖 Bot is running via polling...")
+   print("📌 Keeping bot alive...")
     updater.idle()
 
 if __name__ == "__main__":
