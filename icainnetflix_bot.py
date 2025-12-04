@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from dotenv import load_dotenv
 from telegram import Update, ParseMode
 from telegram.ext import Updater, CommandHandler, CallbackContext
@@ -163,10 +164,14 @@ def main():
     dp.add_handler(CommandHandler("hlink", hlink))
     dp.add_handler(CommandHandler("rslink", rslink))
 
-    updater.start_polling()
-    print("🤖 Bot is running via polling...")
-   print("📌 Keeping bot alive...")
-    updater.idle()
+  updater.start_polling()
+  print("🤖 Bot is running via polling...")
+  print("📌 Keeping bot alive...")
+
+# Keep the bot alive on Railway Hobby plan
+while True:
+    time.sleep(5)
+
 
 if __name__ == "__main__":
     main()
